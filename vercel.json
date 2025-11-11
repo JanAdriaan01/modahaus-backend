@@ -9,8 +9,7 @@
   "routes": [
     {
       "src": "/api/send-email",
-      "dest": "/api/send-email.js",
-      "methods": ["POST"]
+      "dest": "/api/send-email.js"
     }
   ]
 }
