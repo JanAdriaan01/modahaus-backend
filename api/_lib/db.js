@@ -1,13 +1,13 @@
-// canonical DB helper
-const { Pool } = require('pg');
+// _lib/db.js
+import pkg from 'pg';
+const { Pool } = pkg;
 
-const connectionString = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error('Missing DATABASE_URL / DATABASE_URL_UNPOOLED env var');
-}
-const pool = new Pool({ connectionString });
+// Connect to PostgreSQL using environment variable
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL // Set in Vercel environment
+});
 
-module.exports = {
+export default {
   query: (text, params) => pool.query(text, params),
   pool
 };

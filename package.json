@@ -1,17 +1,16 @@
 {
   "name": "modahaus-backend",
   "version": "1.0.0",
-  "private": true,
-  "engines": { "node": ">=18" },
+  "type": "module",
+  "main": "index.js",
   "scripts": {
-    "start": "node server-start.js || true",
-    "migrate": "psql \"$DATABASE_URL\" -f migrations/001_create_tables.sql"
+    "start": "vercel dev",
+    "deploy": "vercel --prod"
   },
   "dependencies": {
-    "bcrypt": "^5.1.0",
+    "pg": "^8.11.1",
+    "bcrypt": "^5.1.1",
     "jsonwebtoken": "^9.0.0",
-    "node-fetch": "^2.6.12",
-    "pg": "^8.10.0",
     "resend": "^1.0.0"
   }
 }

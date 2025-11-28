@@ -1,20 +1,16 @@
 // api/auth.js
-// Combined auth handler for Vercel (CommonJS)
-// Routes via query param: /api/auth?action=register|login|logout|refresh|request-reset|reset-password|verify-email
-
-const db = require('./_lib/db');
-const crypto = require('crypto');
-const { hash, compare } = require('bcrypt');
-const { signAccess, signRefresh, verifyRefresh } = require('./_lib/jwt');
-const { sendEmail } = require('./_lib/email');
+import db from '../_lib/db.js';
+import crypto from 'crypto';
+import { hash, compare } from 'bcrypt';
+import { signAccess, signRefresh, verifyRefresh } from '../_lib/jwt.js';
+import { sendEmail } from '../_lib/email.js';
 
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_SALT_ROUNDS || '12', 10);
 const APP_ORIGIN = process.env.APP_ORIGIN || 'https://www.modahaus.co.za';
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
-    const action = (req.query && req.query.action) || (req.url && new URL(req.url, `http://${req.headers.host}`).searchParams.get('action'));
-    // Normalize method and action
+    const action = req.query?.action;
     if (!action) return res.status(400).json({ message: 'action query param required' });
 
     // ----------------- REGISTER -----------------
@@ -27,20 +23,22 @@ module.exports = async function handler(req, res) {
 
       const passwordHash = await hash(password, BCRYPT_ROUNDS);
       const user = (await db.query(
-        `INSERT INTO users (email, password_hash, first_name, last_name, phone) VALUES ($1,$2,$3,$4,$5) RETURNING id,email,first_name,last_name`,
+        `INSERT INTO users (email, password_hash, first_name, last_name, phone)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id,email,first_name,last_name`,
         [email.toLowerCase(), passwordHash, firstName || null, lastName || null, phone || null]
       )).rows[0];
 
-      // create verification token
       const tokenRaw = crypto.randomBytes(48).toString('hex');
       const tokenHash = crypto.createHash('sha256').update(tokenRaw).digest('hex');
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
-      await db.query('INSERT INTO email_tokens (user_id, token_hash, type, expires_at) VALUES ($1,$2,$3,$4)',
-        [user.id, tokenHash, 'verification', expiresAt]);
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+      await db.query(
+        'INSERT INTO email_tokens (user_id, token_hash, type, expires_at) VALUES ($1,$2,$3,$4)',
+        [user.id, tokenHash, 'verification', expiresAt]
+      );
 
       const verifyUrl = `${APP_ORIGIN}/verify-email?token=${tokenRaw}`;
       const html = `<p>Hello ${firstName || ''},</p><p>Click <a href="${verifyUrl}">here</a> to verify your email.</p>`;
-      try { await sendEmail({ to: user.email, subject: 'Verify your email', html }); } catch (err) { console.error('sendEmail failed in register:', err); }
+      try { await sendEmail({ to: user.email, subject: 'Verify your email', html }); } catch (err) { console.error(err); }
 
       return res.status(201).json({ user: { id: user.id, email: user.email } });
     }
@@ -56,24 +54,26 @@ module.exports = async function handler(req, res) {
       const ok = await compare(password, user.password_hash);
       if (!ok) return res.status(401).json({ message: 'invalid credentials' });
 
-      // produce tokens
       const payload = { userId: user.id, role: user.role || 'user' };
       const accessToken = signAccess(payload);
       const refreshToken = signRefresh({ userId: user.id });
 
-      // store hashed refresh token in DB (sha256)
       const refreshHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30); // 30d
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
 
       await db.query(
-        `INSERT INTO refresh_tokens (user_id, token_hash, ip, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5)`,
-        [user.id, refreshHash, req.headers['x-forwarded-for'] || req.connection?.remoteAddress || null, req.headers['user-agent'] || null, expiresAt]
+        `INSERT INTO refresh_tokens (user_id, token_hash, ip, user_agent, expires_at)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [user.id, refreshHash, req.headers['x-forwarded-for'] || null, req.headers['user-agent'] || null, expiresAt]
       );
 
-      // update last_login
       await db.query('UPDATE users SET last_login_at=now() WHERE id=$1', [user.id]);
 
-      return res.json({ accessToken, refreshToken, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name } });
+      return res.json({
+        accessToken,
+        refreshToken,
+        user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name }
+      });
     }
 
     // ----------------- LOGOUT -----------------
@@ -91,22 +91,25 @@ module.exports = async function handler(req, res) {
       if (!refreshToken) return res.status(400).json({ message: 'refreshToken required' });
 
       let payload;
-      try { payload = verifyRefresh(refreshToken); } catch (err) { return res.status(401).json({ message: 'invalid refresh token' }); }
+      try { payload = verifyRefresh(refreshToken); } catch { return res.status(401).json({ message: 'invalid refresh token' }); }
 
       const rHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-      const row = (await db.query('SELECT * FROM refresh_tokens WHERE token_hash=$1 AND revoked=false AND expires_at > now()', [rHash])).rows[0];
+      const row = (await db.query(
+        'SELECT * FROM refresh_tokens WHERE token_hash=$1 AND revoked=false AND expires_at > now()',
+        [rHash]
+      )).rows[0];
       if (!row) return res.status(401).json({ message: 'refresh token not found or revoked' });
 
-      // rotate refresh token: delete old and insert new
       await db.query('DELETE FROM refresh_tokens WHERE id=$1', [row.id]);
 
       const newAccess = signAccess({ userId: payload.userId });
       const newRefresh = signRefresh({ userId: payload.userId });
       const newHash = crypto.createHash('sha256').update(newRefresh).digest('hex');
       const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
-      await db.query('INSERT INTO refresh_tokens (user_id, token_hash, ip, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5)', [
-        payload.userId, newHash, req.headers['x-forwarded-for'] || req.connection?.remoteAddress || null, req.headers['user-agent'] || null, expiresAt
-      ]);
+      await db.query(
+        'INSERT INTO refresh_tokens (user_id, token_hash, ip, user_agent, expires_at) VALUES ($1,$2,$3,$4,$5)',
+        [payload.userId, newHash, req.headers['x-forwarded-for'] || null, req.headers['user-agent'] || null, expiresAt]
+      );
 
       return res.json({ accessToken: newAccess, refreshToken: newRefresh });
     }
@@ -121,15 +124,15 @@ module.exports = async function handler(req, res) {
 
       const tokenRaw = crypto.randomBytes(48).toString('hex');
       const tokenHash = crypto.createHash('sha256').update(tokenRaw).digest('hex');
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 1); // 1h
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
 
-      await db.query('INSERT INTO email_tokens (user_id, token_hash, type, expires_at) VALUES ($1,$2,$3,$4)', [
-        user.id, tokenHash, 'reset', expiresAt
-      ]);
+      await db.query('INSERT INTO email_tokens (user_id, token_hash, type, expires_at) VALUES ($1,$2,$3,$4)',
+        [user.id, tokenHash, 'reset', expiresAt]
+      );
 
       const resetUrl = `${APP_ORIGIN}/reset-password?token=${tokenRaw}`;
       const html = `<p>Hi ${user.first_name || ''},</p><p>Reset your password: <a href="${resetUrl}">Reset password</a></p>`;
-      try { await sendEmail({ to: user.email, subject: 'Reset your password', html }); } catch (err) { console.error('Resend error request-reset:', err); }
+      try { await sendEmail({ to: user.email, subject: 'Reset your password', html }); } catch (err) { console.error(err); }
 
       return res.json({ message: 'If an account exists we have sent a reset link' });
     }
@@ -140,7 +143,10 @@ module.exports = async function handler(req, res) {
       if (!token || !newPassword) return res.status(400).json({ message: 'token and newPassword required' });
 
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      const row = (await db.query('SELECT * FROM email_tokens WHERE token_hash=$1 AND type=$2 AND expires_at > now()', [tokenHash, 'reset'])).rows[0];
+      const row = (await db.query(
+        'SELECT * FROM email_tokens WHERE token_hash=$1 AND type=$2 AND expires_at > now()',
+        [tokenHash, 'reset']
+      )).rows[0];
       if (!row) return res.status(400).json({ message: 'invalid or expired token' });
 
       const pwHash = await hash(newPassword, BCRYPT_ROUNDS);
@@ -152,11 +158,14 @@ module.exports = async function handler(req, res) {
 
     // ----------------- VERIFY EMAIL -----------------
     if (action === 'verify-email' && req.method === 'GET') {
-      const token = (req.query && req.query.token) || null;
+      const token = req.query?.token;
       if (!token) return res.status(400).json({ message: 'token required' });
 
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-      const row = (await db.query('SELECT * FROM email_tokens WHERE token_hash=$1 AND type=$2 AND expires_at > now()', [tokenHash, 'verification'])).rows[0];
+      const row = (await db.query(
+        'SELECT * FROM email_tokens WHERE token_hash=$1 AND type=$2 AND expires_at > now()',
+        [tokenHash, 'verification']
+      )).rows[0];
       if (!row) return res.status(400).json({ message: 'invalid or expired token' });
 
       await db.query('UPDATE users SET email_verified=true WHERE id=$1', [row.user_id]);
@@ -165,10 +174,9 @@ module.exports = async function handler(req, res) {
       return res.redirect(`${APP_ORIGIN}/email-verified?success=1`);
     }
 
-    // Unknown action
     return res.status(400).json({ message: 'unknown action or wrong method' });
   } catch (err) {
     console.error('Auth handler error:', err);
     return res.status(500).json({ message: 'internal server error' });
   }
-};
+}
