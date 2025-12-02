@@ -2,11 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/**/*.cjs",
+      "src": "api/**/*.{js,cjs}",
       "use": "@vercel/node"
     }
   ],
@@ -15,5 +11,10 @@
       "src": "/api/(.*)",
       "dest": "/api/$1"
     }
-  ]
+  ],
+  "functions": {
+    "api/**/*.{js,cjs}": {
+      "runtime": "nodejs18.x"
+    }
+  }
 }
