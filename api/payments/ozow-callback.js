@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
-const db = require('../_lib/db');
+const db = require('../../_lib/db');
 // optionally send email:
-// const { sendEmail } = require('../_lib/email');
+// const { sendEmail } = require('../../_lib/email');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();

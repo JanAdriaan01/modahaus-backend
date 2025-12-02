@@ -1,5 +1,5 @@
-const db = require('../_lib/db');
-const { getUserIdFromReq } = require('../_lib/auth');
+const db = require('../../_lib/db');
+const { getUserIdFromReq } = require('../../_lib/auth');
 
 module.exports = async (req, res) => {
   const userId = getUserIdFromReq(req);

@@ -1,5 +1,5 @@
 // contact form sending both business email and client confirmation using Resend
-const { sendEmail } = require('./_lib/email');
+const { sendEmail } = require('../_lib/email');
 
 module.exports = async (req, res) => {
   // CORS - allow your frontend origin
