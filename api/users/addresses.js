@@ -4,7 +4,7 @@ module.exports = async function handler(req,res){
 const userId = req.headers['x-user-id'];
 if(!userId) return res.status(401).json({message:'unauthorized'});
 if(req.method==='GET'){
-const addresses = (await db.query('SELECT * FROM user_addresses WHERE user_id=$1',[userId])).rows;
+const addresses = (await db.query('SELECT * FROM user_addres WHERE user_id=$1',[userId])).rows;
 return res.status(200).json({addresses});
 } else if(req.method==='POST'){
 const {label,address,isDefaultShipping,isDefaultBilling} = req.body;
